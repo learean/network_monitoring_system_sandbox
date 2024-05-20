@@ -22,14 +22,6 @@ class SimpleMonitor13(switch.SimpleSwitch13):
         # Load the pre-trained model
         self.flow_model = load_model(os.path.join('../model/ddos_detection_model.h5'))
 
-        # DataFrame to hold flow stats in memory
-        self.flow_stats_df = pd.DataFrame(columns=[
-            'timestamp', 'datapath_id', 'flow_id', 'ip_src', 'tp_src', 'ip_dst', 'tp_dst',
-            'ip_proto', 'icmp_code', 'icmp_type', 'flow_duration_sec', 'flow_duration_nsec',
-            'idle_timeout', 'hard_timeout', 'flags', 'packet_count', 'byte_count',
-            'packet_count_per_second', 'packet_count_per_nsecond', 'byte_count_per_second',
-            'byte_count_per_nsecond'])
-
     @set_ev_cls(ofp_event.EventOFPStateChange, [MAIN_DISPATCHER, DEAD_DISPATCHER])
     def _state_change_handler(self, ev):
         datapath = ev.datapath
@@ -58,60 +50,54 @@ class SimpleMonitor13(switch.SimpleSwitch13):
     @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
     def _flow_stats_reply_handler(self, ev):
         timestamp = datetime.now().timestamp()
-        body = ev.msg.body
-        icmp_code = -1
-        icmp_type = -1
-        tp_src = 0
-        tp_dst = 0
 
-        rows = []
-        for stat in sorted([flow for flow in body if flow.priority == 1], key=lambda flow: (
-        flow.match['eth_type'], flow.match['ipv4_src'], flow.match['ipv4_dst'], flow.match['ip_proto'])):
-            ip_src = stat.match['ipv4_src']
-            ip_dst = stat.match['ipv4_dst']
-            ip_proto = stat.match['ip_proto']
+        with open("PredictFlowStatsfile.csv", "w") as file0:
+            file0.write(
+                'timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
+            body = ev.msg.body
+            icmp_code = -1
+            icmp_type = -1
+            tp_src = 0
+            tp_dst = 0
 
-            if stat.match['ip_proto'] == 1:
-                icmp_code = stat.match['icmpv4_code']
-                icmp_type = stat.match['icmpv4_type']
-            elif stat.match['ip_proto'] == 6:
-                tp_src = stat.match['tcp_src']
-                tp_dst = stat.match['tcp_dst']
-            elif stat.match['ip_proto'] == 17:
-                tp_src = stat.match['udp_src']
-                tp_dst = stat.match['udp_dst']
+            for stat in sorted([flow for flow in body if flow.priority == 1], key=lambda flow: (
+            flow.match['eth_type'], flow.match['ipv4_src'], flow.match['ipv4_dst'], flow.match['ip_proto'])):
+                ip_src = stat.match['ipv4_src']
+                ip_dst = stat.match['ipv4_dst']
+                ip_proto = stat.match['ip_proto']
 
-            flow_id = f"{ip_src}{tp_src}{ip_dst}{tp_dst}{ip_proto}"
+                if stat.match['ip_proto'] == 1:
+                    icmp_code = stat.match['icmpv4_code']
+                    icmp_type = stat.match['icmpv4_type']
+                elif stat.match['ip_proto'] == 6:
+                    tp_src = stat.match['tcp_src']
+                    tp_dst = stat.match['tcp_dst']
+                elif stat.match['ip_proto'] == 17:
+                    tp_src = stat.match['udp_src']
+                    tp_dst = stat.match['udp_dst']
 
-            try:
-                packet_count_per_second = stat.packet_count / stat.duration_sec
-                packet_count_per_nsecond = stat.packet_count / stat.duration_nsec
-            except ZeroDivisionError:
-                packet_count_per_second = 0
-                packet_count_per_nsecond = 0
+                flow_id = f"{ip_src}{tp_src}{ip_dst}{tp_dst}{ip_proto}"
 
-            try:
-                byte_count_per_second = stat.byte_count / stat.duration_sec
-                byte_count_per_nsecond = stat.byte_count / stat.duration_nsec
-            except ZeroDivisionError:
-                byte_count_per_second = 0
-                byte_count_per_nsecond = 0
+                try:
+                    packet_count_per_second = stat.packet_count / stat.duration_sec
+                    packet_count_per_nsecond = stat.packet_count / stat.duration_nsec
+                except ZeroDivisionError:
+                    packet_count_per_second = 0
+                    packet_count_per_nsecond = 0
 
-            rows.append([
-                timestamp, ev.msg.datapath.id, flow_id, ip_src, tp_src, ip_dst, tp_dst,
-                ip_proto, icmp_code, icmp_type, stat.duration_sec, stat.duration_nsec,
-                stat.idle_timeout, stat.hard_timeout, stat.flags, stat.packet_count,
-                stat.byte_count, packet_count_per_second, packet_count_per_nsecond,
-                byte_count_per_second, byte_count_per_nsecond
-            ])
+                try:
+                    byte_count_per_second = stat.byte_count / stat.duration_sec
+                    byte_count_per_nsecond = stat.byte_count / stat.duration_nsec
+                except ZeroDivisionError:
+                    byte_count_per_second = 0
+                    byte_count_per_nsecond = 0
 
-        if rows:
-            self.flow_stats_df = pd.concat([self.flow_stats_df, pd.DataFrame(rows, columns=self.flow_stats_df.columns)],
-                                           ignore_index=True)
+                file0.write(
+                    f"{timestamp},{ev.msg.datapath.id},{flow_id},{ip_src},{tp_src},{ip_dst},{tp_dst},{stat.match['ip_proto']},{icmp_code},{icmp_type},{stat.duration_sec},{stat.duration_nsec},{stat.idle_timeout},{stat.hard_timeout},{stat.flags},{stat.packet_count},{stat.byte_count},{packet_count_per_second},{packet_count_per_nsecond},{byte_count_per_second},{byte_count_per_nsecond}\n")
 
     def flow_predict(self):
-        if not self.flow_stats_df.empty:
-            predict_flow_dataset = self.flow_stats_df.copy()
+        try:
+            predict_flow_dataset = pd.read_csv('PredictFlowStatsfile.csv')
 
             # Convert string IPs to integer-like format for prediction
             predict_flow_dataset['flow_id'] = predict_flow_dataset['flow_id'].str.replace('.', '', regex=False)
@@ -143,5 +129,11 @@ class SimpleMonitor13(switch.SimpleSwitch13):
                     self.logger.info(f"victim might be host with ip_dst: {victim}")
             self.logger.info("------------------------------------------------------------------------------")
 
-            # Clear the DataFrame after processing
-            self.flow_stats_df = pd.DataFrame(columns=self.flow_stats_df.columns)
+            # Clear the file after processing
+            with open("PredictFlowStatsfile.csv", "w") as file0:
+                file0.write(
+                    'timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
+
+        except Exception as e:
+            self.logger.error(f"Error in flow_predict: {e}")
+            pass
