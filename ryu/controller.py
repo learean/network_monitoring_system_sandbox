@@ -58,7 +58,7 @@ class SimpleMonitor13(switch.SimpleSwitch13):
         timestamp = datetime.now()
         timestamp = timestamp.timestamp()
 
-        file0 = open("stats_file", "w")
+        file0 = open("stats_file.csv", "w")
         file0.write(
             'timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
         body = ev.msg.body
@@ -124,7 +124,12 @@ class SimpleMonitor13(switch.SimpleSwitch13):
 
     def flow_predict(self):
         try:
-            predict_flow_dataset = pd.read_csv('stats_file')
+            predict_flow_dataset = pd.read_csv('stats_file.csv')
+
+            # Check if the dataset is empty
+            if predict_flow_dataset.empty:
+                self.logger.info("No flow statistics to predict.")
+                return
 
             predict_flow_dataset.iloc[:, 2] = predict_flow_dataset.iloc[:, 2].str.replace('.', '')
             predict_flow_dataset.iloc[:, 3] = predict_flow_dataset.iloc[:, 3].str.replace('.', '')
@@ -132,6 +137,11 @@ class SimpleMonitor13(switch.SimpleSwitch13):
 
             X_predict_flow = predict_flow_dataset.iloc[:, :].values
             X_predict_flow = X_predict_flow.astype('float64')
+
+            # Check if there are samples to predict
+            if X_predict_flow.shape[0] == 0:
+                self.logger.info("No samples available for prediction.")
+                return
 
             X_predict_flow = self.scaler.transform(X_predict_flow)
 
@@ -156,7 +166,7 @@ class SimpleMonitor13(switch.SimpleSwitch13):
 
             self.logger.info("------------------------------------------------------------------------------")
 
-            file0 = open("stats_file", "w")
+            file0 = open("stats_file.csv", "w")
             file0.write(
                 'timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
             file0.close()
