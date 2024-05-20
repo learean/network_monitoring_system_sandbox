@@ -7,9 +7,11 @@ import switch
 from datetime import datetime
 
 import pandas as pd
+import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import confusion_matrix, accuracy_score
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
 
 
 class SimpleMonitor13(switch.SimpleSwitch13):
@@ -18,7 +20,8 @@ class SimpleMonitor13(switch.SimpleSwitch13):
         super(SimpleMonitor13, self).__init__(*args, **kwargs)
         self.datapaths = {}
         self.monitor_thread = hub.spawn(self._monitor)
-        self.flow_model = None
+        self.model = None
+        self.feature_names = []
         self._initialize_flow_training()
 
     def _initialize_flow_training(self):
@@ -131,16 +134,27 @@ class SimpleMonitor13(switch.SimpleSwitch13):
         flow_dataset.iloc[:, 3] = flow_dataset.iloc[:, 3].str.replace('.', '')
         flow_dataset.iloc[:, 5] = flow_dataset.iloc[:, 5].str.replace('.', '')
 
+        # Exclude the last column (label) for features
+        self.feature_names = flow_dataset.columns[:-1]
+
         X_flow = flow_dataset.iloc[:, :-1].astype(float).values
         y_flow = flow_dataset.iloc[:, -1].values
 
-        X_flow_train, X_flow_test, y_flow_train, y_flow_test = train_test_split(X_flow, y_flow, test_size=0.25,
-                                                                                random_state=0)
+        X_flow_train, X_flow_test, y_flow_train, y_flow_test = train_test_split(X_flow, y_flow, test_size=0.25, random_state=0)
 
-        classifier = RandomForestClassifier(n_estimators=10, criterion="entropy", random_state=0)
-        self.flow_model = classifier.fit(X_flow_train, y_flow_train)
+        # Define the neural network model
+        self.model = Sequential([
+            Dense(64, input_dim=X_flow_train.shape[1], activation='relu'),
+            Dense(32, activation='relu'),
+            Dense(16, activation='relu'),
+            Dense(1, activation='sigmoid')
+        ])
+        self.model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
 
-        y_flow_pred = self.flow_model.predict(X_flow_test)
+        # Train the model
+        self.model.fit(X_flow_train, y_flow_train, epochs=10, batch_size=10, validation_split=0.1, verbose=2)
+
+        y_flow_pred = (self.model.predict(X_flow_test) > 0.5).astype("int32")
 
         self._log_model_performance(y_flow_test, y_flow_pred)
 
@@ -159,8 +173,11 @@ class SimpleMonitor13(switch.SimpleSwitch13):
             predict_flow_dataset.iloc[:, 3] = predict_flow_dataset.iloc[:, 3].str.replace('.', '')
             predict_flow_dataset.iloc[:, 5] = predict_flow_dataset.iloc[:, 5].str.replace('.', '')
 
+            # Align prediction data with training features
+            predict_flow_dataset = predict_flow_dataset[self.feature_names]
+
             X_predict_flow = predict_flow_dataset.astype(float).values
-            y_flow_pred = self.flow_model.predict(X_predict_flow)
+            y_flow_pred = (self.model.predict(X_predict_flow) > 0.5).astype("int32")
 
             self._log_prediction_results(y_flow_pred, predict_flow_dataset)
 
