@@ -61,7 +61,7 @@ class SimpleMonitor13(switch.SimpleSwitch13):
             tp_dst = 0
 
             for stat in sorted([flow for flow in body if flow.priority == 1], key=lambda flow: (
-            flow.match['eth_type'], flow.match['ipv4_src'], flow.match['ipv4_dst'], flow.match['ip_proto'])):
+                    flow.match['eth_type'], flow.match['ipv4_src'], flow.match['ipv4_dst'], flow.match['ip_proto'])):
                 ip_src = stat.match['ipv4_src']
                 ip_dst = stat.match['ipv4_dst']
                 ip_proto = stat.match['ip_proto']
@@ -79,15 +79,15 @@ class SimpleMonitor13(switch.SimpleSwitch13):
                 flow_id = f"{ip_src}{tp_src}{ip_dst}{tp_dst}{ip_proto}"
 
                 try:
-                    packet_count_per_second = stat.packet_count / stat.duration_sec
-                    packet_count_per_nsecond = stat.packet_count / stat.duration_nsec
+                    packet_count_per_second = stat.packet_count / stat.duration_sec if stat.duration_sec > 0 else 0
+                    packet_count_per_nsecond = stat.packet_count / stat.duration_nsec if stat.duration_nsec > 0 else 0
                 except ZeroDivisionError:
                     packet_count_per_second = 0
                     packet_count_per_nsecond = 0
 
                 try:
-                    byte_count_per_second = stat.byte_count / stat.duration_sec
-                    byte_count_per_nsecond = stat.byte_count / stat.duration_nsec
+                    byte_count_per_second = stat.byte_count / stat.duration_sec if stat.duration_sec > 0 else 0
+                    byte_count_per_nsecond = stat.byte_count / stat.duration_nsec if stat.duration_nsec > 0 else 0
                 except ZeroDivisionError:
                     byte_count_per_second = 0
                     byte_count_per_nsecond = 0
