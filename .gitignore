@@ -163,4 +163,4 @@ cython_debug/
 
 ryu/PredictFlowStatsFile.csv
 model/dataset.csv
-model/flow_model.h5
+model/flow_mlp_model.h5
