@@ -3,6 +3,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import confusion_matrix, accuracy_score
 import tensorflow as tf
+import joblib
 
 # Load and preprocess the dataset
 flow_dataset = pd.read_csv('dataset.csv')
@@ -23,6 +24,9 @@ X_flow_train, X_flow_test, y_flow_train, y_flow_test = train_test_split(X_flow, 
 scaler = StandardScaler()
 X_flow_train = scaler.fit_transform(X_flow_train)
 X_flow_test = scaler.transform(X_flow_test)
+
+# Save the fitted scaler
+joblib.dump(scaler, 'flow_scaler.pkl')
 
 # Build the MLP model
 model = tf.keras.Sequential([

@@ -10,7 +10,7 @@ from datetime import datetime
 
 import pandas as pd
 import tensorflow as tf
-from sklearn.preprocessing import StandardScaler
+import joblib
 
 
 class SimpleMonitor13(switch.SimpleSwitch13):
@@ -58,7 +58,7 @@ class SimpleMonitor13(switch.SimpleSwitch13):
         timestamp = datetime.now()
         timestamp = timestamp.timestamp()
 
-        file0 = open("stats_file.csv", "w")
+        file0 = open("stats_file", "w")
         file0.write(
             'timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
         body = ev.msg.body
@@ -116,15 +116,15 @@ class SimpleMonitor13(switch.SimpleSwitch13):
     def flow_training(self):
         self.logger.info("Flow Training ...")
 
-        # Load the trained MLP model
+        # Load the trained MLP model and scaler
         self.flow_model = tf.keras.models.load_model(os.path.join('../model/flow_mlp_model.h5'))
-        self.scaler = StandardScaler()
+        self.scaler = joblib.load(os.path.join('../model/flow_scaler.pkl'))
 
-        self.logger.info("Model loaded successfully")
+        self.logger.info("Model and scaler loaded successfully")
 
     def flow_predict(self):
         try:
-            predict_flow_dataset = pd.read_csv('stats_file.csv')
+            predict_flow_dataset = pd.read_csv('stats_file')
 
             predict_flow_dataset.iloc[:, 2] = predict_flow_dataset.iloc[:, 2].str.replace('.', '')
             predict_flow_dataset.iloc[:, 3] = predict_flow_dataset.iloc[:, 3].str.replace('.', '')
@@ -156,7 +156,7 @@ class SimpleMonitor13(switch.SimpleSwitch13):
 
             self.logger.info("------------------------------------------------------------------------------")
 
-            file0 = open("stats_file.csv", "w")
+            file0 = open("stats_file", "w")
             file0.write(
                 'timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
             file0.close()
