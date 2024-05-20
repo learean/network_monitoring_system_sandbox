@@ -1,17 +1,13 @@
 import os
-
 from ryu.controller import ofp_event
 from ryu.controller.handler import MAIN_DISPATCHER, DEAD_DISPATCHER
 from ryu.controller.handler import set_ev_cls
 from ryu.lib import hub
-
 import switch
 from datetime import datetime
-
 import pandas as pd
 import tensorflow as tf
 import joblib
-
 
 class SimpleMonitor13(switch.SimpleSwitch13):
 
@@ -58,60 +54,62 @@ class SimpleMonitor13(switch.SimpleSwitch13):
         timestamp = datetime.now()
         timestamp = timestamp.timestamp()
 
-        file0 = open("stats_file.csv", "w")
-        file0.write(
-            'timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
-        body = ev.msg.body
-        icmp_code = -1
-        icmp_type = -1
-        tp_src = 0
-        tp_dst = 0
+        file_path = "stats_file.csv"
+        with open(file_path, "w") as file0:
+            file0.write(
+                'timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
 
-        for stat in sorted([flow for flow in body if (flow.priority == 1)], key=lambda flow:
-        (flow.match['eth_type'], flow.match['ipv4_src'], flow.match['ipv4_dst'], flow.match['ip_proto'])):
+            body = ev.msg.body
+            icmp_code = -1
+            icmp_type = -1
+            tp_src = 0
+            tp_dst = 0
 
-            ip_src = stat.match['ipv4_src']
-            ip_dst = stat.match['ipv4_dst']
-            ip_proto = stat.match['ip_proto']
+            for stat in sorted([flow for flow in body if (flow.priority == 1)], key=lambda flow:
+            (flow.match['eth_type'], flow.match['ipv4_src'], flow.match['ipv4_dst'], flow.match['ip_proto'])):
 
-            if stat.match['ip_proto'] == 1:
-                icmp_code = stat.match['icmpv4_code']
-                icmp_type = stat.match['icmpv4_type']
+                ip_src = stat.match['ipv4_src']
+                ip_dst = stat.match['ipv4_dst']
+                ip_proto = stat.match['ip_proto']
 
-            elif stat.match['ip_proto'] == 6:
-                tp_src = stat.match['tcp_src']
-                tp_dst = stat.match['tcp_dst']
+                if stat.match['ip_proto'] == 1:
+                    icmp_code = stat.match['icmpv4_code']
+                    icmp_type = stat.match['icmpv4_type']
 
-            elif stat.match['ip_proto'] == 17:
-                tp_src = stat.match['udp_src']
-                tp_dst = stat.match['udp_dst']
+                elif stat.match['ip_proto'] == 6:
+                    tp_src = stat.match['tcp_src']
+                    tp_dst = stat.match['tcp_dst']
 
-            flow_id = str(ip_src) + str(tp_src) + str(ip_dst) + str(tp_dst) + str(ip_proto)
+                elif stat.match['ip_proto'] == 17:
+                    tp_src = stat.match['udp_src']
+                    tp_dst = stat.match['udp_dst']
 
-            try:
-                packet_count_per_second = stat.packet_count / stat.duration_sec
-                packet_count_per_nsecond = stat.packet_count / stat.duration_nsec
-            except:
-                packet_count_per_second = 0
-                packet_count_per_nsecond = 0
+                flow_id = str(ip_src) + str(tp_src) + str(ip_dst) + str(tp_dst) + str(ip_proto)
 
-            try:
-                byte_count_per_second = stat.byte_count / stat.duration_sec
-                byte_count_per_nsecond = stat.byte_count / stat.duration_nsec
-            except:
-                byte_count_per_second = 0
-                byte_count_per_nsecond = 0
+                try:
+                    packet_count_per_second = stat.packet_count / stat.duration_sec
+                    packet_count_per_nsecond = stat.packet_count / stat.duration_nsec
+                except ZeroDivisionError:
+                    packet_count_per_second = 0
+                    packet_count_per_nsecond = 0
 
-            file0.write("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n"
-                        .format(timestamp, ev.msg.datapath.id, flow_id, ip_src, tp_src, ip_dst, tp_dst,
-                                stat.match['ip_proto'], icmp_code, icmp_type,
-                                stat.duration_sec, stat.duration_nsec,
-                                stat.idle_timeout, stat.hard_timeout,
-                                stat.flags, stat.packet_count, stat.byte_count,
-                                packet_count_per_second, packet_count_per_nsecond,
-                                byte_count_per_second, byte_count_per_nsecond))
+                try:
+                    byte_count_per_second = stat.byte_count / stat.duration_sec
+                    byte_count_per_nsecond = stat.byte_count / stat.duration_nsec
+                except ZeroDivisionError:
+                    byte_count_per_second = 0
+                    byte_count_per_nsecond = 0
 
-        file0.close()
+                file0.write("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n"
+                            .format(timestamp, ev.msg.datapath.id, flow_id, ip_src, tp_src, ip_dst, tp_dst,
+                                    stat.match['ip_proto'], icmp_code, icmp_type,
+                                    stat.duration_sec, stat.duration_nsec,
+                                    stat.idle_timeout, stat.hard_timeout,
+                                    stat.flags, stat.packet_count, stat.byte_count,
+                                    packet_count_per_second, packet_count_per_nsecond,
+                                    byte_count_per_second, byte_count_per_nsecond))
+
+        self.logger.info(f"Flow statistics saved to {file_path}")
 
     def flow_training(self):
         self.logger.info("Flow Training ...")
@@ -147,18 +145,18 @@ class SimpleMonitor13(switch.SimpleSwitch13):
 
             y_flow_pred = (self.flow_model.predict(X_predict_flow) > 0.5).astype("int32")
 
-            legitimate_trafic = 0
-            ddos_trafic = 0
+            legitimate_traffic = 0
+            ddos_traffic = 0
 
             for i in y_flow_pred:
                 if i == 0:
-                    legitimate_trafic += 1
+                    legitimate_traffic += 1
                 else:
-                    ddos_trafic += 1
+                    ddos_traffic += 1
                     victim = int(predict_flow_dataset.iloc[i, 5]) % 20
 
             self.logger.info("------------------------------------------------------------------------------")
-            if (legitimate_trafic / len(y_flow_pred) * 100) > 80:
+            if (legitimate_traffic / len(y_flow_pred) * 100) > 80:
                 self.logger.info("legitimate traffic ...")
             else:
                 self.logger.info("ddos traffic ...")
@@ -166,10 +164,9 @@ class SimpleMonitor13(switch.SimpleSwitch13):
 
             self.logger.info("------------------------------------------------------------------------------")
 
-            file0 = open("stats_file.csv", "w")
-            file0.write(
-                'timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
-            file0.close()
+            with open("stats_file.csv", "w") as file0:
+                file0.write(
+                    'timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
 
         except Exception as e:
             self.logger.error(f"Error in flow prediction: {e}")
