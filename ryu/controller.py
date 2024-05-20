@@ -100,10 +100,6 @@ class SimpleMonitor13(switch.SimpleSwitch13):
 
         self.logger.info(f"Flow statistics saved to {file_path}")
 
-        # Log the contents of the file
-        with open(file_path, 'r') as file0:
-            self.logger.info(f"Contents of {file_path}:\n{file0.read()}")
-
     def flow_training(self):
         self.logger.info("Flow Training ...")
         # Load the trained MLP model and scaler
