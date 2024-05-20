@@ -37,8 +37,19 @@ model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy']
 # Early stopping to avoid overfitting
 early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
+# Convert training data to a TensorFlow dataset and repeat it
+train_dataset = tf.data.Dataset.from_tensor_slices((X_flow_train, y_flow_train))
+train_dataset = train_dataset.shuffle(buffer_size=1024).batch(32).repeat()
+
+# Convert validation data to a TensorFlow dataset (no need to repeat)
+val_dataset = tf.data.Dataset.from_tensor_slices((X_flow_test, y_flow_test))
+val_dataset = val_dataset.batch(32)
+
+# Calculate the number of steps per epoch
+steps_per_epoch = len(X_flow_train) // 32
+
 # Train the model with early stopping
-model.fit(X_flow_train, y_flow_train, epochs=10, batch_size=32, validation_split=0.2, callbacks=[early_stopping], verbose=1)
+model.fit(train_dataset, epochs=5, steps_per_epoch=steps_per_epoch, validation_data=val_dataset, callbacks=[early_stopping], verbose=1)
 
 # Evaluate the model
 y_flow_pred = (model.predict(X_flow_test) > 0.5).astype("int32")
