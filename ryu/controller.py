@@ -9,7 +9,6 @@ import pandas as pd
 import tensorflow as tf
 import joblib
 
-
 class SimpleMonitor13(switch.SimpleSwitch13):
 
     def __init__(self, *args, **kwargs):
@@ -57,8 +56,8 @@ class SimpleMonitor13(switch.SimpleSwitch13):
                 'timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
 
             body = ev.msg.body
-            for stat in sorted([flow for flow in body if (flow.priority == 1)], key=lambda flow:
-            (flow.match['eth_type'], flow.match['ipv4_src'], flow.match['ipv4_dst'], flow.match['ip_proto'])):
+            for stat in sorted([flow for flow in body if flow.priority == 1], key=lambda flow:
+                (flow.match['eth_type'], flow.match['ipv4_src'], flow.match['ipv4_dst'], flow.match['ip_proto'])):
 
                 ip_src = stat.match['ipv4_src']
                 ip_dst = stat.match['ipv4_dst']
@@ -98,12 +97,16 @@ class SimpleMonitor13(switch.SimpleSwitch13):
                                     packet_count_per_second, packet_count_per_nsecond,
                                     byte_count_per_second, byte_count_per_nsecond))
 
+        self.logger.info(f"Flow statistics saved to {file_path}")
+        with open(file_path, 'r') as file0:
+            self.logger.info(f"Contents of {file_path}:\n{file0.read()}")
+
     def flow_training(self):
         self.logger.info("Flow Training ...")
-        # Load the trained MLP model and scaler
         self.flow_model = tf.keras.models.load_model(os.path.join('../model/flow_mlp_model.h5'))
+        self.flow_model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
         self.scaler = joblib.load(os.path.join('../model/flow_scaler.pkl'))
-        self.logger.info("Model and scaler loaded successfully")
+        self.logger.info("Model and scaler loaded and compiled successfully")
 
     def flow_predict(self):
         file_path = 'stats_file.csv'
