@@ -98,8 +98,6 @@ class SimpleMonitor13(switch.SimpleSwitch13):
                                     packet_count_per_second, packet_count_per_nsecond,
                                     byte_count_per_second, byte_count_per_nsecond))
 
-        self.logger.info(f"Flow statistics saved to {file_path}")
-
     def flow_training(self):
         self.logger.info("Flow Training ...")
         # Load the trained MLP model and scaler
