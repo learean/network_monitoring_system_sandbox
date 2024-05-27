@@ -2,7 +2,7 @@ from mininet.log import setLogLevel
 from time import sleep
 from random import choice
 
-from start_network import startNetwork
+from mininet_src.start_network import startNetwork
 from utils import ip_generator
 
 def generate_ddos_traffic(hosts):
