@@ -163,4 +163,11 @@ cython_debug/
 
 ryu/PredictFlowStatsFile.csv
 model/dataset.csv
+model/dataset2.csv
+model/dataset3.csv
+model/dataset4.csv
+model/dataset_pure_0.csv
+model/dataset_pure_0_2.csv
 model/flow_mlp_model.h5
+model/flow_scaler.pkl
+model/tuner

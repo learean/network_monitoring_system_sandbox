@@ -1,14 +1,14 @@
-import os
 from ryu.controller import ofp_event
 from ryu.controller.handler import MAIN_DISPATCHER, DEAD_DISPATCHER
 from ryu.controller.handler import set_ev_cls
 from ryu.lib import hub
-import switch
 from datetime import datetime
 import pandas as pd
-import tensorflow as tf
-import joblib
-
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import confusion_matrix, accuracy_score
+import switch
+from common_utils import get_timestamp, write_flow_stats
 
 class SimpleMonitor13(switch.SimpleSwitch13):
 
@@ -16,6 +16,7 @@ class SimpleMonitor13(switch.SimpleSwitch13):
         super(SimpleMonitor13, self).__init__(*args, **kwargs)
         self.datapaths = {}
         self.monitor_thread = hub.spawn(self._monitor)
+        self.flow_model = None
 
         start = datetime.now()
         self.flow_training()
@@ -49,71 +50,80 @@ class SimpleMonitor13(switch.SimpleSwitch13):
 
     @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
     def _flow_stats_reply_handler(self, ev):
-        timestamp = datetime.now().timestamp()
-        file_path = "stats_file.csv"
+        stats = []
+        timestamp = get_timestamp()
+        body = ev.msg.body
+        for stat in sorted([flow for flow in body if flow.priority == 1], key=lambda flow:
+                           (flow.match['eth_type'], flow.match['ipv4_src'], flow.match['ipv4_dst'], flow.match['ip_proto'])):
+            stat_dict = {
+                'timestamp': timestamp,
+                'datapath_id': ev.msg.datapath.id,
+                'flow_id': f"{stat.match['ipv4_src']}{stat.match['tcp_src']}{stat.match['ipv4_dst']}{stat.match['tcp_dst']}{stat.match['ip_proto']}",
+                'ip_src': stat.match['ipv4_src'],
+                'tp_src': stat.match.get('tcp_src', 0),
+                'ip_dst': stat.match['ipv4_dst'],
+                'tp_dst': stat.match.get('tcp_dst', 0),
+                'ip_proto': stat.match['ip_proto'],
+                'icmp_code': stat.match.get('icmpv4_code', -1),
+                'icmp_type': stat.match.get('icmpv4_type', -1),
+                'duration_sec': stat.duration_sec,
+                'duration_nsec': stat.duration_nsec,
+                'idle_timeout': stat.idle_timeout,
+                'hard_timeout': stat.hard_timeout,
+                'flags': stat.flags,
+                'packet_count': stat.packet_count,
+                'byte_count': stat.byte_count,
+                'packet_count_per_second': stat.packet_count / stat.duration_sec if stat.duration_sec > 0 else 0,
+                'packet_count_per_nsecond': stat.packet_count / stat.duration_nsec if stat.duration_nsec > 0 else 0,
+                'byte_count_per_second': stat.byte_count / stat.duration_sec if stat.duration_sec > 0 else 0,
+                'byte_count_per_nsecond': stat.byte_count / stat.duration_nsec if stat.duration_nsec > 0 else 0
+            }
+            stats.append(stat_dict)
 
-        with open(file_path, "w") as file0:
-            file0.write(
-                'timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
+        self.write_stats_to_file(stats)
 
-            body = ev.msg.body
-            for stat in sorted([flow for flow in body if (flow.priority == 1)], key=lambda flow:
-            (flow.match['eth_type'], flow.match['ipv4_src'], flow.match['ipv4_dst'], flow.match['ip_proto'])):
-
-                ip_src = stat.match['ipv4_src']
-                ip_dst = stat.match['ipv4_dst']
-                ip_proto = stat.match['ip_proto']
-                icmp_code = stat.match.get('icmpv4_code', -1)
-                icmp_type = stat.match.get('icmpv4_type', -1)
-                tp_src = stat.match.get('tcp_src', stat.match.get('udp_src', 0))
-                tp_dst = stat.match.get('tcp_dst', stat.match.get('udp_dst', 0))
-                flow_id = f"{ip_src}{tp_src}{ip_dst}{tp_dst}{ip_proto}"
-
-                try:
-                    packet_count_per_second = stat.packet_count / stat.duration_sec
-                except ZeroDivisionError:
-                    packet_count_per_second = 0
-
-                try:
-                    packet_count_per_nsecond = stat.packet_count / stat.duration_nsec
-                except ZeroDivisionError:
-                    packet_count_per_nsecond = 0
-
-                try:
-                    byte_count_per_second = stat.byte_count / stat.duration_sec
-                except ZeroDivisionError:
-                    byte_count_per_second = 0
-
-                try:
-                    byte_count_per_nsecond = stat.byte_count / stat.duration_nsec
-                except ZeroDivisionError:
-                    byte_count_per_nsecond = 0
-
-                file0.write("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n"
-                            .format(timestamp, ev.msg.datapath.id, flow_id, ip_src, tp_src, ip_dst, tp_dst,
-                                    ip_proto, icmp_code, icmp_type,
-                                    stat.duration_sec, stat.duration_nsec,
-                                    stat.idle_timeout, stat.hard_timeout,
-                                    stat.flags, stat.packet_count, stat.byte_count,
-                                    packet_count_per_second, packet_count_per_nsecond,
-                                    byte_count_per_second, byte_count_per_nsecond))
+    def write_stats_to_file(self, stats):
+        with open("PredictFlowStatsfile.csv", "w") as file:
+            file.write('timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
+            write_flow_stats(file, stats, None)
 
     def flow_training(self):
         self.logger.info("Flow Training ...")
-        # Load the trained MLP model and scaler
-        self.flow_model = tf.keras.models.load_model(os.path.join('../model/flow_mlp_model.h5'))
-        self.scaler = joblib.load(os.path.join('../model/flow_scaler.pkl'))
-        self.logger.info("Model and scaler loaded successfully")
+
+        flow_dataset = pd.read_csv('FlowStatsfile.csv')
+
+        flow_dataset.iloc[:, 2] = flow_dataset.iloc[:, 2].str.replace('.', '')
+        flow_dataset.iloc[:, 3] = flow_dataset.iloc[:, 3].str.replace('.', '')
+        flow_dataset.iloc[:, 5] = flow_dataset.iloc[:, 5].str.replace('.', '')
+
+        X_flow = flow_dataset.iloc[:, :-1].values
+        X_flow = X_flow.astype('float64')
+
+        y_flow = flow_dataset.iloc[:, -1].values
+
+        X_flow_train, X_flow_test, y_flow_train, y_flow_test = train_test_split(X_flow, y_flow, test_size=0.25, random_state=0)
+
+        classifier = RandomForestClassifier(n_estimators=10, criterion="entropy", random_state=0)
+        self.flow_model = classifier.fit(X_flow_train, y_flow_train)
+
+        y_flow_pred = self.flow_model.predict(X_flow_test)
+
+        self.logger.info("------------------------------------------------------------------------------")
+
+        self.logger.info("confusion matrix")
+        cm = confusion_matrix(y_flow_test, y_flow_pred)
+        self.logger.info(cm)
+
+        acc = accuracy_score(y_flow_test, y_flow_pred)
+
+        self.logger.info("success accuracy = {0:.2f} %".format(acc * 100))
+        fail = 1.0 - acc
+        self.logger.info("fail accuracy = {0:.2f} %".format(fail * 100))
+        self.logger.info("------------------------------------------------------------------------------")
 
     def flow_predict(self):
-        file_path = 'stats_file.csv'
         try:
-            predict_flow_dataset = pd.read_csv(file_path)
-            if predict_flow_dataset.empty:
-                self.logger.info("No flow statistics to predict.")
-                return
-
-            self.logger.info(f"Read {len(predict_flow_dataset)} rows from {file_path}")
+            predict_flow_dataset = pd.read_csv('PredictFlowStatsfile.csv')
 
             predict_flow_dataset.iloc[:, 2] = predict_flow_dataset.iloc[:, 2].str.replace('.', '')
             predict_flow_dataset.iloc[:, 3] = predict_flow_dataset.iloc[:, 3].str.replace('.', '')
@@ -122,34 +132,25 @@ class SimpleMonitor13(switch.SimpleSwitch13):
             X_predict_flow = predict_flow_dataset.iloc[:, :].values
             X_predict_flow = X_predict_flow.astype('float64')
 
-            if X_predict_flow.shape[0] == 0:
-                self.logger.info("No samples available for prediction.")
-                return
+            y_flow_pred = self.flow_model.predict(X_predict_flow)
 
-            X_predict_flow = self.scaler.transform(X_predict_flow)
-            y_flow_pred = (self.flow_model.predict(X_predict_flow) > 0.5).astype("int32")
-
-            legitimate_traffic = 0
-            ddos_traffic = 0
-            for i in y_flow_pred:
-                if i == 0:
-                    legitimate_traffic += 1
-                else:
-                    ddos_traffic += 1
-                    victim = int(predict_flow_dataset.iloc[i, 5]) % 20
+            legitimate_traffic = sum(y_flow_pred == 0)
+            ddos_traffic = sum(y_flow_pred == 1)
 
             self.logger.info("------------------------------------------------------------------------------")
             if (legitimate_traffic / len(y_flow_pred) * 100) > 80:
                 self.logger.info("legitimate traffic ...")
             else:
                 self.logger.info("ddos traffic ...")
-                self.logger.info("victim is host: h{}".format(victim))
+                victims = [int(flow_id) % 20 for flow_id in predict_flow_dataset['flow_id'][y_flow_pred == 1]]
+                self.logger.info("victims are hosts: {}".format(victims))
+
             self.logger.info("------------------------------------------------------------------------------")
 
-            with open(file_path, "w") as file0:
-                file0.write(
-                    'timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
+            with open("PredictFlowStatsfile.csv", "w") as file:
+                file.write('timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
 
         except Exception as e:
-            self.logger.error(f"Error in flow prediction: {e}")
+            self.logger.error("Error in flow_predict: {}".format(e))
 
+app_manager.require_app('main_controller')
