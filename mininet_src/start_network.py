@@ -1,4 +1,4 @@
-from mininet_src.my_topology import MyTopo
+from my_topology import MyTopo
 
 from mininet.node import RemoteController
 from mininet.net import Mininet
