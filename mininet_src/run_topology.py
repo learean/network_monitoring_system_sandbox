@@ -5,7 +5,9 @@ from start_network import startNetwork
 def main():
     setLogLevel('info')
 
-    net = startNetwork()
+    net, hosts = startNetwork()
+
+    print(hosts)
 
     # Drop into CLI for exploring the topology
     CLI(net)
