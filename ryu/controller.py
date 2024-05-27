@@ -153,4 +153,3 @@ class SimpleMonitor13(switch.SimpleSwitch13):
         except Exception as e:
             self.logger.error("Error in flow_predict: {}".format(e))
 
-app_manager.require_app('main_controller')

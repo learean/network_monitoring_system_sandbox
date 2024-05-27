@@ -8,5 +8,3 @@ class CollectDDOSTrafficApp(BaseCollectApp):
     def write_stats_to_file(self, stats):
         with open("FlowStatsfile.csv", "a+") as file:
             write_flow_stats(file, stats, 1)
-
-app_manager.require_app('collect_ddos')
