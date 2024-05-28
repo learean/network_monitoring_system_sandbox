@@ -4,13 +4,14 @@ from ryu.controller import ofp_event
 from ryu.controller.handler import MAIN_DISPATCHER, DEAD_DISPATCHER
 from ryu.controller.handler import set_ev_cls
 from ryu.lib import hub
+
+import switch
 from datetime import datetime
+
 import pandas as pd
-from sklearn.preprocessing import StandardScaler
 import tensorflow as tf
 import joblib
-import switch
-from common_utils import get_timestamp, write_flow_stats
+
 
 class SimpleMonitor13(switch.SimpleSwitch13):
 
@@ -19,13 +20,12 @@ class SimpleMonitor13(switch.SimpleSwitch13):
         self.datapaths = {}
         self.monitor_thread = hub.spawn(self._monitor)
 
-        # Load the pre-trained model and scaler
-        self.flow_model = tf.keras.models.load_model(os.path.join('../model/flow_mlp_model.h5'))
-        self.scaler = joblib.load(os.path.join('../model/flow_scaler.pkl'))
-
         start = datetime.now()
+
+        self.flow_training()
+
         end = datetime.now()
-        print("Initialization time: ", (end - start))
+        print("Training time: ", (end - start))
 
     @set_ev_cls(ofp_event.EventOFPStateChange, [MAIN_DISPATCHER, DEAD_DISPATCHER])
     def _state_change_handler(self, ev):
@@ -49,78 +49,117 @@ class SimpleMonitor13(switch.SimpleSwitch13):
     def _request_stats(self, datapath):
         self.logger.debug('send stats request: %016x', datapath.id)
         parser = datapath.ofproto_parser
+
         req = parser.OFPFlowStatsRequest(datapath)
         datapath.send_msg(req)
 
     @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
     def _flow_stats_reply_handler(self, ev):
-        stats = []
-        timestamp = get_timestamp()
+        timestamp = datetime.now()
+        timestamp = timestamp.timestamp()
+
+        file0 = open("stats_file", "w")
+        file0.write(
+            'timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
         body = ev.msg.body
-        for stat in sorted([flow for flow in body if flow.priority == 1], key=lambda flow:
-                           (flow.match['eth_type'], flow.match['ipv4_src'], flow.match['ipv4_dst'], flow.match['ip_proto'])):
-            stat_dict = {
-                'timestamp': timestamp,
-                'datapath_id': ev.msg.datapath.id,
-                'flow_id': f"{stat.match['ipv4_src']}{stat.match['tcp_src']}{stat.match['ipv4_dst']}{stat.match['tcp_dst']}{stat.match['ip_proto']}",
-                'ip_src': stat.match['ipv4_src'],
-                'tp_src': stat.match.get('tcp_src', 0),
-                'ip_dst': stat.match['ipv4_dst'],
-                'tp_dst': stat.match.get('tcp_dst', 0),
-                'ip_proto': stat.match['ip_proto'],
-                'icmp_code': stat.match.get('icmpv4_code', -1),
-                'icmp_type': stat.match.get('icmpv4_type', -1),
-                'duration_sec': stat.duration_sec,
-                'duration_nsec': stat.duration_nsec,
-                'idle_timeout': stat.idle_timeout,
-                'hard_timeout': stat.hard_timeout,
-                'flags': stat.flags,
-                'packet_count': stat.packet_count,
-                'byte_count': stat.byte_count,
-                'packet_count_per_second': stat.packet_count / stat.duration_sec if stat.duration_sec > 0 else 0,
-                'packet_count_per_nsecond': stat.packet_count / stat.duration_nsec if stat.duration_nsec > 0 else 0,
-                'byte_count_per_second': stat.byte_count / stat.duration_sec if stat.duration_sec > 0 else 0,
-                'byte_count_per_nsecond': stat.byte_count / stat.duration_nsec if stat.duration_nsec > 0 else 0
-            }
-            stats.append(stat_dict)
+        icmp_code = -1
+        icmp_type = -1
+        tp_src = 0
+        tp_dst = 0
 
-        self.write_stats_to_file(stats)
+        for stat in sorted([flow for flow in body if (flow.priority == 1)], key=lambda flow:
+        (flow.match['eth_type'], flow.match['ipv4_src'], flow.match['ipv4_dst'], flow.match['ip_proto'])):
 
-    def write_stats_to_file(self, stats):
-        with open("PredictFlowStatsfile.csv", "w") as file:
-            file.write('timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
-            write_flow_stats(file, stats, None)
+            ip_src = stat.match['ipv4_src']
+            ip_dst = stat.match['ipv4_dst']
+            ip_proto = stat.match['ip_proto']
+
+            if stat.match['ip_proto'] == 1:
+                icmp_code = stat.match['icmpv4_code']
+                icmp_type = stat.match['icmpv4_type']
+
+            elif stat.match['ip_proto'] == 6:
+                tp_src = stat.match['tcp_src']
+                tp_dst = stat.match['tcp_dst']
+
+            elif stat.match['ip_proto'] == 17:
+                tp_src = stat.match['udp_src']
+                tp_dst = stat.match['udp_dst']
+
+            flow_id = str(ip_src) + str(tp_src) + str(ip_dst) + str(tp_dst) + str(ip_proto)
+
+            try:
+                packet_count_per_second = stat.packet_count / stat.duration_sec
+                packet_count_per_nsecond = stat.packet_count / stat.duration_nsec
+            except:
+                packet_count_per_second = 0
+                packet_count_per_nsecond = 0
+
+            try:
+                byte_count_per_second = stat.byte_count / stat.duration_sec
+                byte_count_per_nsecond = stat.byte_count / stat.duration_nsec
+            except:
+                byte_count_per_second = 0
+                byte_count_per_nsecond = 0
+
+            file0.write("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n"
+                        .format(timestamp, ev.msg.datapath.id, flow_id, ip_src, tp_src, ip_dst, tp_dst,
+                                stat.match['ip_proto'], icmp_code, icmp_type,
+                                stat.duration_sec, stat.duration_nsec,
+                                stat.idle_timeout, stat.hard_timeout,
+                                stat.flags, stat.packet_count, stat.byte_count,
+                                packet_count_per_second, packet_count_per_nsecond,
+                                byte_count_per_second, byte_count_per_nsecond))
+
+        file0.close()
+
+    def flow_training(self):
+        self.logger.info("Flow Training ...")
+
+        # Load the trained MLP model and scaler
+        self.flow_model = tf.keras.models.load_model(os.path.join('../model/flow_mlp_model.h5'))
+        self.scaler = joblib.load(os.path.join('../model/flow_scaler.pkl'))
+
+        self.logger.info("Model and scaler loaded successfully")
 
     def flow_predict(self):
         try:
-            predict_flow_dataset = pd.read_csv('PredictFlowStatsfile.csv')
+            predict_flow_dataset = pd.read_csv('stats_file')
 
-            predict_flow_dataset.iloc[:, 2] = predict_flow_dataset.iloc[:, 2].str.replace('.', '', regex=False)
-            predict_flow_dataset.iloc[:, 3] = predict_flow_dataset.iloc[:, 3].str.replace('.', '', regex=False)
-            predict_flow_dataset.iloc[:, 5] = predict_flow_dataset.iloc[:, 5].str.replace('.', '', regex=False)
+            predict_flow_dataset.iloc[:, 2] = predict_flow_dataset.iloc[:, 2].str.replace('.', '')
+            predict_flow_dataset.iloc[:, 3] = predict_flow_dataset.iloc[:, 3].str.replace('.', '')
+            predict_flow_dataset.iloc[:, 5] = predict_flow_dataset.iloc[:, 5].str.replace('.', '')
 
-            X_predict_flow = predict_flow_dataset.iloc[:, :-1].values.astype('float64')
+            X_predict_flow = predict_flow_dataset.iloc[:, :].values
+            X_predict_flow = X_predict_flow.astype('float64')
 
-            # Scale the data
             X_predict_flow = self.scaler.transform(X_predict_flow)
 
             y_flow_pred = (self.flow_model.predict(X_predict_flow) > 0.5).astype("int32")
 
-            legitimate_traffic = sum(y_flow_pred == 0)
-            ddos_traffic = sum(y_flow_pred == 1)
+            legitimate_trafic = 0
+            ddos_trafic = 0
+
+            for i in y_flow_pred:
+                if i == 0:
+                    legitimate_trafic += 1
+                else:
+                    ddos_trafic += 1
+                    victim = int(predict_flow_dataset.iloc[i, 5]) % 20
 
             self.logger.info("------------------------------------------------------------------------------")
-            if (legitimate_traffic / len(y_flow_pred) * 100) > 80:
+            if (legitimate_trafic / len(y_flow_pred) * 100) > 80:
                 self.logger.info("legitimate traffic ...")
             else:
                 self.logger.info("ddos traffic ...")
-                victims = [int(flow_id) % 20 for flow_id in predict_flow_dataset['flow_id'][y_flow_pred == 1]]
-                self.logger.info("victims are hosts: {}".format(victims))
+                self.logger.info("victim is host: h{}".format(victim))
 
             self.logger.info("------------------------------------------------------------------------------")
 
-            with open("PredictFlowStatsfile.csv", "w") as file:
-                file.write('timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
+            file0 = open("stats_file", "w")
+            file0.write(
+                'timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
+            file0.close()
 
         except Exception as e:
-            self.logger.error("Error in flow_predict: {}".format(e))
+            self.logger.error(f"Error in flow prediction: {e}")
