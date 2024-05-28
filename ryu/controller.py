@@ -136,6 +136,7 @@ class SimpleMonitor13(switch.SimpleSwitch13):
                 else:
                     ddos_traffic += 1
                     victim = int(predict_flow_dataset.iloc[i, 5]) % 20
+                    malicious_src = predict_flow_dataset.iloc[i, 3]  # Assuming column 3 is the source IP
 
             self.logger.info("------------------------------------------------------------------------------")
             if (legitimate_traffic / len(y_flow_pred) * 100) > 80:
@@ -143,6 +144,8 @@ class SimpleMonitor13(switch.SimpleSwitch13):
             else:
                 self.logger.info("ddos traffic ...")
                 self.logger.info("victim is host: h{}".format(victim))
+                self.logger.info("Blocking traffic from malicious source: {}".format(malicious_src))
+                self.block_malicious_traffic(malicious_src)
             self.logger.info("------------------------------------------------------------------------------")
 
             with open(file_path, "w") as file0:
@@ -152,3 +155,18 @@ class SimpleMonitor13(switch.SimpleSwitch13):
         except Exception as e:
             self.logger.error(f"Error in flow prediction: {e}")
 
+    def block_malicious_traffic(self, malicious_src):
+        for dp in self.datapaths.values():
+            ofproto = dp.ofproto
+            parser = dp.ofproto_parser
+
+            match = parser.OFPMatch(ipv4_src=malicious_src)
+            actions = []  # No actions = drop the packet
+
+            inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions)]
+            mod = parser.OFPFlowMod(
+                datapath=dp, priority=2, match=match,
+                instructions=inst, command=ofproto.OFPFC_ADD,
+                idle_timeout=0, hard_timeout=0)
+            dp.send_msg(mod)
+            self.logger.info("Installed flow rule to block traffic from {}".format(malicious_src))
