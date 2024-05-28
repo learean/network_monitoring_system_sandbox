@@ -16,6 +16,10 @@ class SimpleMonitor13(switch.SimpleSwitch13):
         self.datapaths = {}
         self.monitor_thread = hub.spawn(self._monitor)
 
+        self.dynamic_rate_limit = 1000  # Initial rate limit in kbps
+        self.default_rate_limit = 1000  # Default rate limit in kbps
+        self.max_rate_limit = 10000  # Maximum rate limit in kbps
+
         start = datetime.now()
         self.flow_training()
         end = datetime.now()
