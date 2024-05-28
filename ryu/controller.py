@@ -1,3 +1,5 @@
+import os
+
 from ryu.controller import ofp_event
 from ryu.controller.handler import MAIN_DISPATCHER, DEAD_DISPATCHER
 from ryu.controller.handler import set_ev_cls
@@ -18,8 +20,8 @@ class SimpleMonitor13(switch.SimpleSwitch13):
         self.monitor_thread = hub.spawn(self._monitor)
 
         # Load the pre-trained model and scaler
-        self.flow_model = tf.keras.models.load_model('flow_mlp_model.h5')
-        self.scaler = joblib.load('flow_scaler.pkl')
+        self.flow_model = tf.keras.models.load_model(os.path.join('../model/flow_mlp_model.h5'))
+        self.scaler = joblib.load(os.path.join('../model/flow_scaler.pkl'))
 
         start = datetime.now()
         end = datetime.now()
