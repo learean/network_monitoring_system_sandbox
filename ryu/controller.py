@@ -4,9 +4,9 @@ from ryu.controller.handler import set_ev_cls
 from ryu.lib import hub
 from datetime import datetime
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import confusion_matrix, accuracy_score
+from sklearn.preprocessing import StandardScaler
+import tensorflow as tf
+import joblib
 import switch
 from common_utils import get_timestamp, write_flow_stats
 
@@ -16,12 +16,14 @@ class SimpleMonitor13(switch.SimpleSwitch13):
         super(SimpleMonitor13, self).__init__(*args, **kwargs)
         self.datapaths = {}
         self.monitor_thread = hub.spawn(self._monitor)
-        self.flow_model = None
+
+        # Load the pre-trained model and scaler
+        self.flow_model = tf.keras.models.load_model('flow_mlp_model.h5')
+        self.scaler = joblib.load('flow_scaler.pkl')
 
         start = datetime.now()
-        self.flow_training()
         end = datetime.now()
-        print("Training time: ", (end - start))
+        print("Initialization time: ", (end - start))
 
     @set_ev_cls(ofp_event.EventOFPStateChange, [MAIN_DISPATCHER, DEAD_DISPATCHER])
     def _state_change_handler(self, ev):
@@ -87,52 +89,20 @@ class SimpleMonitor13(switch.SimpleSwitch13):
             file.write('timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
             write_flow_stats(file, stats, None)
 
-    def flow_training(self):
-        self.logger.info("Flow Training ...")
-
-        flow_dataset = pd.read_csv('FlowStatsfile.csv')
-
-        flow_dataset.iloc[:, 2] = flow_dataset.iloc[:, 2].str.replace('.', '')
-        flow_dataset.iloc[:, 3] = flow_dataset.iloc[:, 3].str.replace('.', '')
-        flow_dataset.iloc[:, 5] = flow_dataset.iloc[:, 5].str.replace('.', '')
-
-        X_flow = flow_dataset.iloc[:, :-1].values
-        X_flow = X_flow.astype('float64')
-
-        y_flow = flow_dataset.iloc[:, -1].values
-
-        X_flow_train, X_flow_test, y_flow_train, y_flow_test = train_test_split(X_flow, y_flow, test_size=0.25, random_state=0)
-
-        classifier = RandomForestClassifier(n_estimators=10, criterion="entropy", random_state=0)
-        self.flow_model = classifier.fit(X_flow_train, y_flow_train)
-
-        y_flow_pred = self.flow_model.predict(X_flow_test)
-
-        self.logger.info("------------------------------------------------------------------------------")
-
-        self.logger.info("confusion matrix")
-        cm = confusion_matrix(y_flow_test, y_flow_pred)
-        self.logger.info(cm)
-
-        acc = accuracy_score(y_flow_test, y_flow_pred)
-
-        self.logger.info("success accuracy = {0:.2f} %".format(acc * 100))
-        fail = 1.0 - acc
-        self.logger.info("fail accuracy = {0:.2f} %".format(fail * 100))
-        self.logger.info("------------------------------------------------------------------------------")
-
     def flow_predict(self):
         try:
             predict_flow_dataset = pd.read_csv('PredictFlowStatsfile.csv')
 
-            predict_flow_dataset.iloc[:, 2] = predict_flow_dataset.iloc[:, 2].str.replace('.', '')
-            predict_flow_dataset.iloc[:, 3] = predict_flow_dataset.iloc[:, 3].str.replace('.', '')
-            predict_flow_dataset.iloc[:, 5] = predict_flow_dataset.iloc[:, 5].str.replace('.', '')
+            predict_flow_dataset.iloc[:, 2] = predict_flow_dataset.iloc[:, 2].str.replace('.', '', regex=False)
+            predict_flow_dataset.iloc[:, 3] = predict_flow_dataset.iloc[:, 3].str.replace('.', '', regex=False)
+            predict_flow_dataset.iloc[:, 5] = predict_flow_dataset.iloc[:, 5].str.replace('.', '', regex=False)
 
-            X_predict_flow = predict_flow_dataset.iloc[:, :].values
-            X_predict_flow = X_predict_flow.astype('float64')
+            X_predict_flow = predict_flow_dataset.iloc[:, :-1].values.astype('float64')
 
-            y_flow_pred = self.flow_model.predict(X_predict_flow)
+            # Scale the data
+            X_predict_flow = self.scaler.transform(X_predict_flow)
+
+            y_flow_pred = (self.flow_model.predict(X_predict_flow) > 0.5).astype("int32")
 
             legitimate_traffic = sum(y_flow_pred == 0)
             ddos_traffic = sum(y_flow_pred == 1)
@@ -152,4 +122,3 @@ class SimpleMonitor13(switch.SimpleSwitch13):
 
         except Exception as e:
             self.logger.error("Error in flow_predict: {}".format(e))
-
