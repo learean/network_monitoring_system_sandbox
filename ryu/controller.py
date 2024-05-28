@@ -143,7 +143,7 @@ class SimpleMonitor13(switch.SimpleSwitch13):
                     victim = int(predict_flow_dataset.iloc[idx, 5]) % 20
                     victim_ip = f'10.0.0.{victim}'
                     victim_ips.add(victim_ip)
-                    self.adjust_dynamic_rate_limit(victim_ip, ddos_traffic, legitimate_traffic)
+                    #self.adjust_dynamic_rate_limit(victim_ip, ddos_traffic, legitimate_traffic)
 
             if (legitimate_traffic / len(y_flow_pred) * 100) > 80:
                 self.logger.info("legitimate traffic ...")
