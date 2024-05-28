@@ -109,7 +109,8 @@ class SimpleMonitor13(switch.SimpleSwitch13):
         try:
             predict_flow_dataset = pd.read_csv(file_path)
             if predict_flow_dataset.empty:
-                self.logger.info("No flow statistics to predict.")
+                self.logger.info("legitimate traffic ...")
+                self.increase_rate_limit()
                 return
 
             self.logger.info(f"Read {len(predict_flow_dataset)} rows from {file_path}")
@@ -122,8 +123,6 @@ class SimpleMonitor13(switch.SimpleSwitch13):
             X_predict_flow = X_predict_flow.astype('float64')
 
             if X_predict_flow.shape[0] == 0:
-                self.logger.info("legitimate traffic ...")
-                self.increase_rate_limit()
                 return
 
             X_predict_flow = self.scaler.transform(X_predict_flow)
