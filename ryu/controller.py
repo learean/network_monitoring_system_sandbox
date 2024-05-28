@@ -188,7 +188,8 @@ class SimpleMonitor13(switch.SimpleSwitch13):
                 meter_mod = parser.OFPMeterMod(datapath=dp, command=ofproto.OFPMC_ADD, flags=ofproto.OFPMF_KBPS,
                                                meter_id=meter_id, bands=bands)
                 dp.send_msg(meter_mod)
-                self.logger.info(f"Installed meter entry with ID {meter_id} and rate {rate_limit_kbps} kbps")
+                self.logger.info(
+                    f"Installed meter entry with ID {meter_id} and rate {rate_limit_kbps} kbps on switch {dp.address}")
 
                 # Apply the meter to traffic destined to the victim
                 match = parser.OFPMatch(ipv4_dst=victim_ip)
@@ -200,6 +201,7 @@ class SimpleMonitor13(switch.SimpleSwitch13):
                     instructions=inst, command=ofproto.OFPFC_ADD,
                     idle_timeout=0, hard_timeout=0)
                 dp.send_msg(mod)
-                self.logger.info(f"Installed flow rule to rate limit traffic to {victim_ip} with meter ID {meter_id}")
+                self.logger.info(
+                    f"Installed flow rule to rate limit traffic to {victim_ip} on switch {dp.address} with meter ID {meter_id}")
             except Exception as e:
-                self.logger.error(f"Error installing rate limit for {victim_ip}: {e}")
+                self.logger.error(f"Error installing rate limit for {victim_ip} on switch {dp.address}: {e}")
