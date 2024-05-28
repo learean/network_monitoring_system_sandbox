@@ -180,20 +180,26 @@ class SimpleMonitor13(switch.SimpleSwitch13):
             ofproto = dp.ofproto
             parser = dp.ofproto_parser
 
-            # Define meter entry
-            bands = [parser.OFPMeterBandDrop(rate=self.dynamic_rate_limit, burst_size=10)]  # Dynamic rate limiting
-            meter_mod = parser.OFPMeterMod(datapath=dp, command=ofproto.OFPMC_ADD, flags=ofproto.OFPMF_KBPS,
-                                           meter_id=1, bands=bands)
-            dp.send_msg(meter_mod)
+            try:
+                # Define meter entry
+                meter_id = 1
+                rate_limit_kbps = int(self.dynamic_rate_limit)  # Ensure the rate limit is an integer
+                bands = [parser.OFPMeterBandDrop(rate=rate_limit_kbps, burst_size=10)]  # Dynamic rate limiting
+                meter_mod = parser.OFPMeterMod(datapath=dp, command=ofproto.OFPMC_ADD, flags=ofproto.OFPMF_KBPS,
+                                               meter_id=meter_id, bands=bands)
+                dp.send_msg(meter_mod)
+                self.logger.info(f"Installed meter entry with ID {meter_id} and rate {rate_limit_kbps} kbps")
 
-            # Apply the meter to traffic destined to the victim
-            match = parser.OFPMatch(ipv4_dst=victim_ip)
-            actions = [parser.OFPActionOutput(ofproto.OFPP_NORMAL)]
-            inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions),
-                    parser.OFPInstructionMeter(meter_id=1, type_=ofproto.OFPIT_METER)]
-            mod = parser.OFPFlowMod(
-                datapath=dp, priority=2, match=match,
-                instructions=inst, command=ofproto.OFPFC_ADD,
-                idle_timeout=0, hard_timeout=0)
-            dp.send_msg(mod)
-            self.logger.info("Installed flow rule to rate limit traffic to {}".format(victim_ip))
+                # Apply the meter to traffic destined to the victim
+                match = parser.OFPMatch(ipv4_dst=victim_ip)
+                actions = [parser.OFPActionOutput(ofproto.OFPP_NORMAL)]
+                inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions),
+                        parser.OFPInstructionMeter(meter_id=meter_id, type_=ofproto.OFPIT_METER)]
+                mod = parser.OFPFlowMod(
+                    datapath=dp, priority=2, match=match,
+                    instructions=inst, command=ofproto.OFPFC_ADD,
+                    idle_timeout=0, hard_timeout=0)
+                dp.send_msg(mod)
+                self.logger.info(f"Installed flow rule to rate limit traffic to {victim_ip} with meter ID {meter_id}")
+            except Exception as e:
+                self.logger.error(f"Error installing rate limit for {victim_ip}: {e}")
