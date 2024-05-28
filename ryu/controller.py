@@ -114,16 +114,15 @@ class SimpleMonitor13(switch.SimpleSwitch13):
 
             self.logger.info(f"Read {len(predict_flow_dataset)} rows from {file_path}")
 
-            # Clean and prepare data
-            predict_flow_dataset['ip_src'] = predict_flow_dataset['ip_src'].astype(str).str.replace('.', '', regex=False)
-            predict_flow_dataset['ip_dst'] = predict_flow_dataset['ip_dst'].astype(str).str.replace('.', '', regex=False)
-            predict_flow_dataset['flow_id'] = predict_flow_dataset['flow_id'].astype(str).str.replace('.', '', regex=False)
+            predict_flow_dataset.iloc[:, 2] = predict_flow_dataset.iloc[:, 2].str.replace('.', '')
+            predict_flow_dataset.iloc[:, 3] = predict_flow_dataset.iloc[:, 3].str.replace('.', '')
+            predict_flow_dataset.iloc[:, 5] = predict_flow_dataset.iloc[:, 5].str.replace('.', '')
 
-            X_predict_flow = predict_flow_dataset.iloc[:, :-1].values
+            X_predict_flow = predict_flow_dataset.iloc[:, :].values
             X_predict_flow = X_predict_flow.astype('float64')
 
             if X_predict_flow.shape[0] == 0:
-                self.logger.info("No samples available for prediction.")
+                #self.logger.info("No samples available for prediction.")
                 return
 
             X_predict_flow = self.scaler.transform(X_predict_flow)
@@ -131,26 +130,23 @@ class SimpleMonitor13(switch.SimpleSwitch13):
 
             legitimate_traffic = 0
             ddos_traffic = 0
-            victim_ips = []
-            for idx, pred in enumerate(y_flow_pred):
-                if pred == 0:
+            for i in y_flow_pred:
+                if i == 0:
                     legitimate_traffic += 1
                 else:
                     ddos_traffic += 1
-                    victim_ip = predict_flow_dataset.iloc[idx, predict_flow_dataset.columns.get_loc('ip_dst')]
-                    victim_ips.append(victim_ip)
+                    victim = int(predict_flow_dataset.iloc[i, 5]) % 20
 
             self.logger.info("------------------------------------------------------------------------------")
             if (legitimate_traffic / len(y_flow_pred) * 100) > 80:
                 self.logger.info("legitimate traffic ...")
             else:
                 self.logger.info("ddos traffic ...")
-                for victim_ip in victim_ips:
-                    self.logger.info(f"Rate limiting traffic to victim: {victim_ip}")
-                    self.rate_limit_victim_traffic(victim_ip)
+                self.logger.info("victim is host: h{}".format(victim))
+                self.logger.info("Initiating Rate Limiting on h{}".format(victim))
+                self.rate_limit_victim_traffic(f'10.0.0.{victim}')
             self.logger.info("------------------------------------------------------------------------------")
 
-            # Clear the stats file
             with open(file_path, "w") as file0:
                 file0.write(
                     'timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
@@ -180,4 +176,3 @@ class SimpleMonitor13(switch.SimpleSwitch13):
                 idle_timeout=0, hard_timeout=0)
             dp.send_msg(mod)
             self.logger.info("Installed flow rule to rate limit traffic to {}".format(victim_ip))
-
