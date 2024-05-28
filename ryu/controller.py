@@ -176,7 +176,7 @@ class SimpleMonitor13(switch.SimpleSwitch13):
             self.host_rate_limits[victim_ip] = min(self.max_rate_limit,
                                                    self.host_rate_limits[victim_ip] * 1.1)  # Increase rate limit
 
-        self.logger.info(f"Adjusted dynamic rate limit for {victim_ip} to {self.host_rate_limits[victim_ip]} kbps")
+        #self.logger.info(f"Adjusted dynamic rate limit for {victim_ip} to {self.host_rate_limits[victim_ip]} kbps")
 
     def increase_rate_limits(self):
         # Gradually increase the rate limit to the maximum value if no DDoS traffic is detected
