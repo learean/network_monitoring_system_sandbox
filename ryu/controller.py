@@ -8,9 +8,14 @@ from datetime import datetime
 import pandas as pd
 import tensorflow as tf
 import joblib
+from ryu.app.wsgi import WSGIApplication, ControllerBase, route
+from webob import Response
+import json
 
 
 class SimpleMonitor13(switch.SimpleSwitch13):
+
+    _CONTEXTS = {'wsgi': WSGIApplication}
 
     def __init__(self, *args, **kwargs):
         super(SimpleMonitor13, self).__init__(*args, **kwargs)
@@ -25,6 +30,9 @@ class SimpleMonitor13(switch.SimpleSwitch13):
         self.flow_training()
         end = datetime.now()
         print("Training time: ", (end - start))
+
+        wsgi = kwargs['wsgi']
+        wsgi.register(SimpleMonitorController, {'simple_monitor_app': self})
 
     @set_ev_cls(ofp_event.EventOFPStateChange, [MAIN_DISPATCHER, DEAD_DISPATCHER])
     def _state_change_handler(self, ev):
@@ -143,7 +151,7 @@ class SimpleMonitor13(switch.SimpleSwitch13):
                     victim = int(predict_flow_dataset.iloc[idx, 5]) % 20
                     victim_ip = f'10.0.0.{victim}'
                     victim_ips.add(victim_ip)
-                    #self.adjust_dynamic_rate_limit(victim_ip, ddos_traffic, legitimate_traffic)
+                    self.adjust_dynamic_rate_limit(victim_ip, ddos_traffic, legitimate_traffic)
 
             if (legitimate_traffic / len(y_flow_pred) * 100) > 80:
                 self.logger.info("legitimate traffic ...")
@@ -176,7 +184,7 @@ class SimpleMonitor13(switch.SimpleSwitch13):
             self.host_rate_limits[victim_ip] = min(self.max_rate_limit,
                                                    self.host_rate_limits[victim_ip] * 1.1)  # Increase rate limit
 
-        #self.logger.info(f"Adjusted dynamic rate limit for {victim_ip} to {self.host_rate_limits[victim_ip]} kbps")
+        self.logger.info(f"Adjusted dynamic rate limit for {victim_ip} to {self.host_rate_limits[victim_ip]} kbps")
 
     def increase_rate_limits(self):
         # Gradually increase the rate limit to the maximum value if no DDoS traffic is detected
@@ -236,3 +244,38 @@ class SimpleMonitor13(switch.SimpleSwitch13):
                 self.logger.info(f"Removed flow rule limiting traffic to {victim_ip} on switch {dp.id}")
             except Exception as e:
                 self.logger.error(f"Error removing rate limit for {victim_ip} on switch {dp.id}: {e}")
+
+
+class SimpleMonitorController(ControllerBase):
+    def __init__(self, req, link, data, **config):
+        super(SimpleMonitorController, self).__init__(req, link, data, **config)
+        self.simple_monitor_app = data['simple_monitor_app']
+
+    @route('monitor', '/monitor/flowstats', methods=['GET'])
+    def list_flow_stats(self, req, **kwargs):
+        file_path = 'stats_file.csv'
+        try:
+            with open(file_path, 'r') as f:
+                body = f.read()
+            return Response(content_type='application/json', body=json.dumps(body).encode('utf-8'))
+        except Exception as e:
+            return Response(content_type='application/json', body=json.dumps({'error': str(e)}).encode('utf-8'))
+
+    @route('monitor', '/monitor/rate_limit', methods=['POST'])
+    def set_rate_limit(self, req, **kwargs):
+        try:
+            data = json.loads(req.body)
+            victim_ip = data['victim_ip']
+            rate_limit = data['rate_limit']
+            self.simple_monitor_app.host_rate_limits[victim_ip] = rate_limit
+            return Response(content_type='application/json', body=json.dumps({'status': 'success'}).encode('utf-8'))
+        except Exception as e:
+            return Response(content_type='application/json', body=json.dumps({'error': str(e)}).encode('utf-8'))
+
+    @route('monitor', '/monitor/current_rate_limits', methods=['GET'])
+    def get_current_rate_limits(self, req, **kwargs):
+        try:
+            rate_limits = self.simple_monitor_app.host_rate_limits
+            return Response(content_type='application/json', body=json.dumps(rate_limits).encode('utf-8'))
+        except Exception as e:
+            return Response(content_type='application/json', body=json.dumps({'error': str(e)}).encode('utf-8'))
