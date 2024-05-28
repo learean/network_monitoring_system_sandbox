@@ -114,15 +114,16 @@ class SimpleMonitor13(switch.SimpleSwitch13):
 
             self.logger.info(f"Read {len(predict_flow_dataset)} rows from {file_path}")
 
-            predict_flow_dataset.iloc[:, 2] = predict_flow_dataset.iloc[:, 2].str.replace('.', '')
-            predict_flow_dataset.iloc[:, 3] = predict_flow_dataset.iloc[:, 3].str.replace('.', '')
-            predict_flow_dataset.iloc[:, 5] = predict_flow_dataset.iloc[:, 5].str.replace('.', '')
+            # Clean and prepare data
+            predict_flow_dataset['ip_src'] = predict_flow_dataset['ip_src'].astype(str).str.replace('.', '', regex=False)
+            predict_flow_dataset['ip_dst'] = predict_flow_dataset['ip_dst'].astype(str).str.replace('.', '', regex=False)
+            predict_flow_dataset['flow_id'] = predict_flow_dataset['flow_id'].astype(str).str.replace('.', '', regex=False)
 
-            X_predict_flow = predict_flow_dataset.iloc[:, :].values
+            X_predict_flow = predict_flow_dataset.iloc[:, :-1].values
             X_predict_flow = X_predict_flow.astype('float64')
 
             if X_predict_flow.shape[0] == 0:
-                #self.logger.info("No samples available for prediction.")
+                self.logger.info("No samples available for prediction.")
                 return
 
             X_predict_flow = self.scaler.transform(X_predict_flow)
@@ -130,24 +131,26 @@ class SimpleMonitor13(switch.SimpleSwitch13):
 
             legitimate_traffic = 0
             ddos_traffic = 0
-            for i in y_flow_pred:
-                if i == 0:
+            victim_ips = []
+            for idx, pred in enumerate(y_flow_pred):
+                if pred == 0:
                     legitimate_traffic += 1
                 else:
                     ddos_traffic += 1
-                    victim = int(predict_flow_dataset.iloc[i, 5]) % 20
-                    malicious_src = predict_flow_dataset.iloc[i, 3]  # Assuming column 3 is the source IP
+                    victim_ip = predict_flow_dataset.iloc[idx, predict_flow_dataset.columns.get_loc('ip_dst')]
+                    victim_ips.append(victim_ip)
 
             self.logger.info("------------------------------------------------------------------------------")
             if (legitimate_traffic / len(y_flow_pred) * 100) > 80:
                 self.logger.info("legitimate traffic ...")
             else:
                 self.logger.info("ddos traffic ...")
-                self.logger.info("victim is host: h{}".format(victim))
-                self.logger.info("Blocking traffic from malicious source: {}".format(malicious_src))
-                self.block_malicious_traffic(malicious_src)
+                for victim_ip in victim_ips:
+                    self.logger.info(f"Rate limiting traffic to victim: {victim_ip}")
+                    self.rate_limit_victim_traffic(victim_ip)
             self.logger.info("------------------------------------------------------------------------------")
 
+            # Clear the stats file
             with open(file_path, "w") as file0:
                 file0.write(
                     'timestamp,datapath_id,flow_id,ip_src,tp_src,ip_dst,tp_dst,ip_proto,icmp_code,icmp_type,flow_duration_sec,flow_duration_nsec,idle_timeout,hard_timeout,flags,packet_count,byte_count,packet_count_per_second,packet_count_per_nsecond,byte_count_per_second,byte_count_per_nsecond\n')
@@ -155,18 +158,26 @@ class SimpleMonitor13(switch.SimpleSwitch13):
         except Exception as e:
             self.logger.error(f"Error in flow prediction: {e}")
 
-    def block_malicious_traffic(self, malicious_src):
+    def rate_limit_victim_traffic(self, victim_ip):
         for dp in self.datapaths.values():
             ofproto = dp.ofproto
             parser = dp.ofproto_parser
 
-            match = parser.OFPMatch(ipv4_src=malicious_src)
-            actions = []  # No actions = drop the packet
+            # Define meter entry
+            bands = [parser.OFPMeterBandDrop(rate=1000, burst_size=10)]  # Rate limiting at 1000 kbps
+            meter_mod = parser.OFPMeterMod(datapath=dp, command=ofproto.OFPMC_ADD, flags=ofproto.OFPMF_KBPS,
+                                           meter_id=1, bands=bands)
+            dp.send_msg(meter_mod)
 
-            inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions)]
+            # Apply the meter to traffic destined to the victim
+            match = parser.OFPMatch(ipv4_dst=victim_ip)
+            actions = [parser.OFPActionOutput(ofproto.OFPP_NORMAL)]
+            inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions),
+                    parser.OFPInstructionMeter(meter_id=1, type_=ofproto.OFPIT_METER)]
             mod = parser.OFPFlowMod(
                 datapath=dp, priority=2, match=match,
                 instructions=inst, command=ofproto.OFPFC_ADD,
                 idle_timeout=0, hard_timeout=0)
             dp.send_msg(mod)
-            self.logger.info("Installed flow rule to block traffic from {}".format(malicious_src))
+            self.logger.info("Installed flow rule to rate limit traffic to {}".format(victim_ip))
+
